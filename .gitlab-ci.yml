@@ -1,0 +1,45 @@
+default:
+  image: docker.deployed.pl/dpld/flashcard-workshop-backend:ci
+  before_script: &default_before_script
+    - git config --global url."https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.deployed.pl/".insteadOf ssh://git@gitlab.deployed.pl/
+    - uv sync --frozen
+
+stages:
+  - quality
+
+variables:
+  POSTGRES_DB: flashcard_workshop
+  POSTGRES_USER: flashcard_workshop
+  POSTGRES_PASSWORD: flashcard_workshop
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: 5432
+  UV_PROJECT_ENVIRONMENT: /app/.venv
+
+pre-commit: # if this jobs get slow over time, consider using alternative job https://gitlab.deployed.pl/dpld/cookiecutter-django-project/-/snippets/54
+    stage: quality
+    variables:
+      PRE_COMMIT_HOME: ${CI_PROJECT_DIR}/.cache/pre-commit
+    script:
+        - pre-commit run --show-diff-on-failure --color=always --all-files
+    cache:
+      - key:
+          files:
+            - .pre-commit-config.yaml
+        paths:
+          - ${PRE_COMMIT_HOME}
+
+pytest:
+  stage: quality
+  services:
+    - name: postgres:17
+      pull_policy: if-not-present
+  script:
+    - uv run pytest --cov=flashcard_workshop --cov-report xml:coverage.xml --cov-report term-missing --junitxml=report.xml -n 2
+  coverage: '/(?i)total.*? (100(?:\.0+)?\%|[1-9]?\d(?:\.\d+)?\%)$/'
+  artifacts:
+    reports:
+      junit: report.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: coverage.xml
+    expire_in: 7 days

@@ -1,0 +1,67 @@
+x-common-backend: &common-backend
+  image: ${COMPOSE_DOCKER_IMAGE}
+  user: 1000:1000
+  networks:
+    - traefik
+    - bridge
+  env_file: .env
+
+services:
+  backend:
+    <<: *common-backend
+    restart: always
+    depends_on:
+      - postgres
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik"
+      - "traefik.http.routers.flashcard_workshop.entrypoints=websecure"
+      - "traefik.http.routers.flashcard_workshop.rule=Host(`${COMPOSE_DOMAIN_NAME}`)"
+      - "traefik.http.services.flashcard_workshop.loadbalancer.server.port=8010"
+      - "traefik.http.routers.flashcard_workshop.tls=true"
+    ports:
+      - "8010:8010"
+    volumes:
+      - traefik_shared_static_files:/app/public
+    command: "gunicorn flashcard_workshop.wsgi -w 4 -b 0.0.0.0:8010"
+
+  postgres:
+    image: postgres:17
+    container_name: flashcard_postgres
+    restart: on-failure
+    networks:
+      - bridge
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    env_file: .env
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-q", "-d", "${POSTGRES_DB}", "-U", "${POSTGRES_USER}" ]
+      interval: 1s
+      retries: 20
+
+  migrations:
+    <<: *common-backend
+    restart: "no"
+    depends_on:
+      - postgres
+    command: "python manage.py migrate"
+
+  collectstatic:
+    <<: *common-backend
+    restart: "no"
+    command: "python manage.py collectstatic --no-input"
+    volumes:
+      - traefik_shared_static_files:/app/public
+    depends_on:
+      - backend
+
+volumes:
+  static_files:
+  traefik_shared_static_files:
+    external: true
+  postgres_data:
+
+networks:
+  traefik:
+    external: true
+  bridge:
